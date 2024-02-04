@@ -1,7 +1,7 @@
 # US-Crime-Analysis
 This project was done in conjunction with class ISYE 6501 at the University of Georgia.
 ### Project Objective
-Using the data set file uscrime.txt (http://www.statsci.org/data/general/uscrime.txt), I tested various methods of model building and variable selection to find the model with the lowest MSE.
+Using the data set file uscrime.txt (http://www.statsci.org/data/general/uscrime.txt, http://www.statsci.org/data/general/uscrime.html, I tested various methods of model building and variable selection to find the model with the lowest MSE.
 The method used are:
 1. Linear Regression
 2. Linear Regression with Box-Cox transformation
