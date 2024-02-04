@@ -1,0 +1,221 @@
+---
+title: "Linear Regression Analysis - US Crime"
+author: "Hannah Pavlovich"
+date: "2024-02-04"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r include=FALSE}
+### GOOD PRACTICES ###
+library(outliers)
+library(ggplot2)
+library(gridExtra)
+library(randomcoloR)
+library(car)
+library(DAAG)
+
+rm(list = ls())
+set.seed(42) # set a seed so it everything be reproducible  
+```
+
+The purpose of this portion is to perform Linear Regression Analysis on the Data Set and choose the best model based on $R^2_{adj}$ and Goodness-of_fit tests.
+In this exercise, I do not split the data because the sample set is very low at 47 entries.
+After standard linear regression, linear regression with predictor selection and Box-Cox Transformation are performed.
+
+```{r}
+### Read in the data
+crimedata <- read.table("data/uscrime.txt", stringsAsFactors = FALSE, header = TRUE)
+```
+
+
+#### Linear Regression Analysis - All Predictors
+
+For this basic exercise, we do not split the data into training and testing. This is partially due to the small dataset, with only 47 data points
+
+```{r}
+
+crime_lm_all <- lm(Crime ~., data = crimedata) # create a linear model
+summary(crime_lm_all) # output summary
+```
+
+The summary here gives us the residual standard error, multiple
+R-Squared, and adjusted R-squared. We will use the adjusted R-squared
+because we are using multiple attributes in this model. Our adjusted
+R-squared is 0.7995, or 79.95%. This number is pretty good, but
+let's see if we can make it better!
+
+The output provides us with estimates for the coefficients for the
+linear model and information and guesses at their statistical
+signficances, the p-values. I am most interested in the low p-values as
+these indicate higher statistical significance
+
+```{r}
+which(summary(crime_lm_all)$coeff[,4]<0.05) #extracts which variables have p-values below alpha = 0.05
+```
+
+The above code gives us the M, Ed, Ineq, and Prob have the highest
+statistical significance the relationship to the response variable,
+crime. This is interesting, but not particularly helpful for building
+our model!
+
+
+### Linear Regression Analysis - Selected Predictors
+
+After running on all the data to get an idea of the general model, I
+looked back at the information on this data set. There are two predictor
+variables I will not include in the next model:
+
+1.  Po2: per capita expenditure on police protection in 1959
+
+    -   I choose not to include this because it is almost the same as
+        the data for Po1. Because there is such strong correlation, it
+        will overfit the data.
+
+2.  U2: unemployment rate of urban males 35-39
+
+    -   I choose not to include this for the same reasons as for Po2.
+        There is a strong colinearity between U1 and U2, and including
+        them both would overfit the data.
+
+Then I run another linear model to see if it provides a better fit.
+
+```{r}
+## create the selective linear model
+crime_lm <- lm(Crime ~ M + So + Ed + Po1 + LF + M.F + Pop + NW + U2 + Wealth +
+                 Ineq + Prob + Time, data = crimedata) 
+summary(crime_lm)
+```
+
+Our Adjusted R-Squared here is 0.6804, which is less than the one for
+the other predictor. This model is better representative of the data,
+though, because it removes the two predictor variables that were
+overitting the data.
+
+### Goodness of Fit - Residual Analysis
+
+Next, we do a goodness of fit test to see how well this model actually
+fits the data.
+
+During our EDA, we did an analysis not related to residuals, like the
+scatterplot analysis. We checked the linearity assumption during the EDA
+and found that it did not hold for most predictor variables, but there
+was some fit.
+
+#### Constance Variance Assumption
+
+```{r}
+resids = rstandard(crime_lm) # find standard residuals
+#plot residuals against the fitted variables for constant variance
+plot(x = crime_lm$fitted.values, y = resids, xlab = ('Fitted Values'), 
+     ylab = ("Residuals"), col = "blue")
+
+```
+
+We want to check if $\sigma^2$ is constant across the model. The
+relatoinship between fitted values and residuals is not consistent, so
+it does not pass the constant variance assumption. However, the constant
+variance could be much worse.
+
+#### Normality Assumption
+
+If the linear model holds, the distribution of the residuals should be
+normal. To check this, we do a qqnorm plot and histogram plot.
+
+```{r}
+hist(resids, border = "black", col = "lightblue", main = "Histogram of Residuals")
+
+#check normality assumption with qqplot
+qqnorm(resids, col = "darkblue")
+qqline(resids, col = "red")
+
+```
+
+Looking at this distribution, it looks almost normal, but the spread at
+the tails is not correct. The Normal QQ Plot does not stick to the line,
+especially at the tails. For these reasons, the normality assumption
+does not hold.
+
+#### Independence Assumption
+
+```{r}
+plot(x = resids, y =  crime_lm$fitted.values, xlab = ('Fitted Values'), 
+     ylab = ("Residuals"), col = "blue") 
+```
+
+Here we are checking for uncorrelated errors. There does not look like
+their is any clumping, which means that there are not any correlated
+errors, which means our errors are independent of one another.
+
+### Transform the Data
+
+While there are more tests we can run, transforming the data is the next
+step as the model is not holding well with the assumptions.
+
+```{r}
+bc <- boxCox(crime_lm, lambda = seq(-2, 2, 1/10))
+lambda <- bc$x[which.max(bc$y)]
+lambda_round <- round(lambda*2)/2
+bc
+paste("ideal lambda = ", lambda_round)
+```
+
+According to this, the ideal $\lambda$ is 0, which suggestions we do a
+log transformation on the data. Should we try it?
+
+```{r}
+## Create new linear model using the log of crime (response variable)
+crime_t = lm(log(Crime)~ M + So + Ed + Po1 + LF + M.F + Pop + NW + 
+    U1 + Wealth + Ineq + Prob + Time, data =crimedata)
+summary(crime_t)
+```
+
+The summary here gives us a higher P-value and lower adjusted R-squared,
+which means that the model is less correct than before the transform.
+However, we can transform ALL data, not just the response. Let's stop
+and go back to before!
+
+### Conclusion: Predicting the Model
+
+Now we use our test point using the limited linear model (without Po2
+and U2) to predict the data. Here is the summary of that model again:
+
+```{r}
+summary(crime_lm)
+```
+
+Now let's get to our prediction!
+
+```{r}
+## create a prediction based on the crime_lm linear model, which is an 
+## untransformed model with two predictor variables removed
+
+test_point = data.frame(M = 14.0, So = 0, Ed = 10.0, Po1 = 12.0, Po2 = 15.5,
+                        LF = 0.640, M.F = 94.0, Pop = 150, NW = 1.1, U1 = 0.120,
+                        U2 = 3.6, Wealth = 3200, Ineq = 20.1, Prob = 0.04, Time = 39.0)
+
+cat("Prediction for Test Point =", predict(crime_lm, test_point))
+```
+
+**My prediction for the test data set is 957.369.**
+
+
+I created three linear models to test the crime data, one with all of
+the data, one with a lower amount of data, and one with the response
+variable transformed by the natural log. I then looked at the $R^2$
+values and the p-values. A higher $R^2$ and lower p-value indicates
+better goodness of fit for our model.
+
+I chose to disregard the first model with all variables because there
+was collinearity among two sets of predictor variables. While it had the
+highest $R^2$, I did not trust it.
+
+The natural log transformed data set had a lower $R^2$ than the other
+two, so I also chose to disregard this model. The model I chose, with
+the summary above, has $R^2$ **= 68%**. This is the best fit without
+overfitting.
+
+

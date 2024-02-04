@@ -147,21 +147,17 @@ Above, I ran the Grubbs Tests to check for outliers on the highest and
 lowest ends. According to this test, our high point 1993 is NOT an
 outlier with $\alpha$ = 0.05.
 
-To be certain, I wanted to plot the crime data against the other
-predictors, one by one.
-
-```{r}
-library(gridExtra)
-
-linear_plot <- function(i){
-  ggplot(crimedata, aes(x = crimedata[,i], y = Crime, group = 1)) + 
-    geom_point(size = 1) + geom_line() + xlab(names(crimedata[i]))
-}
-  
-  do.call(grid.arrange, lapply(1:15, linear_plot))
-
-```
-
 By quick inspection, plots against Po1 and Po2 imply some sort of
 linearity. While not getting too deep into this, I can reject the
 hypothesis that an outlier exists.
+
+#### Correlation
+
+```{r}
+res <- cor(crimedata[,1:15], method="pearson")
+corrplot::corrplot(res, method= "square", order = "AOE", tl.pos = 'n')
+```
+
+From the above, we have a better understanding of how the predictor
+variables are correlated. Some of them have very strong correlations
+while many of them are near-zero.
