@@ -1,0 +1,349 @@
+---
+title: "Principal Component Regression - US Crime"
+author: "Hannah Pavlovich"
+date: "2024-02-04"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Question 5.1
+
+*Using crime data from the file uscrime.txt
+(<http://www.statsci.org/data/general/uscrime.txt,> description at
+[http://www.statsci.org/data/general/uscrime.html),](http://www.statsci.org/data/general/uscrime.html),)
+
+
+## Question 9.1
+
+*Using the same crime data set uscrime.txt as in Question 8.2, apply
+Principal Component Analysis and then create a regression model using
+the first few principal components. Specify your new model in terms of
+the original variables (not the principal components), and compare its
+quality to that of your solution to Question 8.2. You can use the R
+function prcomp for PCA. (Note that to first scale the     data, you can
+include scale. = TRUE to scale as part of the PCA function. Don't forget
+that, to make a prediction for the new city, you'll need to unscale the
+coefficients (i.e., do the scaling calculation in reverse)!)*
+
+## Solution
+
+```{r include=FALSE}
+### GOOD PRACTICES ###
+library(outliers)
+library(ggplot2)
+library(gridExtra)
+library(randomcoloR)
+library(car)
+library(corrplot)
+library(clusterSim)
+library(magrittr)
+library(factoextra)
+library(pls)
+library(DAAG)
+library(GGally)
+
+
+rm(list = ls())
+set.seed(42) # set a seed so it everything be reproducible  
+```
+
+### Exploratory Data Analysis
+
+First, let's do some Exploratory Data Analysis and get a good look at
+the data we are dealing with.
+
+```{r}
+### Read in the data
+crimedata <- read.table("uscrime.txt", stringsAsFactors = FALSE, header = TRUE)
+```
+
+I also make a scatterplot of ALL variables against Crime to see where
+there is linearity.
+
+```{r}
+## Function to create scatter plots
+scat_plot <- function(i){
+  ggplot(crimedata, aes(x = crimedata[,i], y = Crime)) + 
+    geom_point(weight = 1.5, color = randomColor()) +  xlab(names(crimedata[i]))
+}
+
+## Return scatterplots
+
+  do.call(grid.arrange, lapply(1:15, scat_plot))
+```
+
+Let's visualize the data, specifically the **correlation of the data.**
+
+```{r}
+res <- cor(crimedata[,1:15], method="pearson")
+corrplot::corrplot(res, method= "square", order = "AOE", tl.pos = 'n')
+```
+
+From the above, we have a better understanding of how the predictor
+variables are correlated. Some of them have very strong correlations
+while many of them are near-zero.
+
+Our goal in using PCA-analysis is to reduce the correlation between
+these predictor variables to reduce overfitting.
+
+### Scaling the Data
+
+Next I scale the data, to center the data around 0-0 and get a more
+sensible scale of the data. I replot the correlation matrix and
+exploratory models.
+
+```{r}
+### Scale the data
+data_scaled_t <- as.data.frame(scale(crimedata))
+```
+
+```{r}
+## Function to create scatter plots with new data
+scat_plot <- function(i){
+  ggplot(data_scaled_t, aes(x = data_scaled_t[,i], y = Crime)) + 
+    geom_point(weight = 1.5, color = randomColor()) +  xlab(names(data_scaled_t[i]))
+}
+
+## Return scatterplots
+
+  do.call(grid.arrange, lapply(1:15, scat_plot))
+  
+```
+
+Here, we still see similar correlations, but the data is now centered
+around (0,0), which allows us to better analyze our information.
+
+Above, we can see that **variable So is a categorical variable.** We
+will thus remove it from our PCA, as PCA should only be run with
+numerical variables. I will remove this and rescale the data:
+
+```{r}
+data_scaled <- as.data.frame(scale(crimedata[,-2]))
+```
+
+### Principal Component Analysis
+
+Above I explored the visualizations of scaled data to have an
+understanding of scaling. I will use the **prcomp()** to scale my data
+in this step. The information from data_scaled will come in use later.
+
+I will also only include the **predictor variables** in the PCA
+analysis, as the purpose is to reduce the amount and rank only the
+predictor variables
+
+```{r}
+## first, remove the categorical variable, as it should not be part of 
+## any PCA
+pca_crime <- prcomp(crimedata[, c(1, 3:15)], center = TRUE, scale = TRUE)
+summary(pca_crime)
+```
+
+Next, I will plot a few of the PC's of our transformed data to get an
+idea of what has happened here.
+
+```{r}
+PC1.2 <- ggplot(as.data.frame(pca_crime$x), aes(x = PC1, y = PC2)) + geom_point(weight = 1.5, color = randomColor())
+PC2.3 <- ggplot(as.data.frame(pca_crime$x), aes(x = PC2, y = PC3)) + geom_point(weight = 1.5, color = randomColor())
+PC3.4 <- ggplot(as.data.frame(pca_crime$x), aes(x = PC3, y = PC4)) + geom_point(weight = 1.5, color = randomColor())
+PC4.5 <- ggplot(as.data.frame(pca_crime$x), aes(x = PC4, y = PC5)) + geom_point(weight = 1.5, color = randomColor())
+
+grid.arrange(PC1.2, PC2.3, PC3.4, PC4.5)
+```
+
+These graphs show us that the Data has been transformed to run
+**parallel to the x-axis**, and they are each linear combinations of the
+different predictor variables.
+
+Now, let's look at the correlation between all our predictor variables.
+If we are correct, our correlations should be very close to 0.
+
+```{r}
+res2 <- cor(pca_crime$x, method="pearson")
+corrplot::corrplot(res2, method= "square", order = "AOE", tl.pos = 'n')
+
+```
+
+The matrix validates our model, that the correlations are all very close
+to 0 because our graph is entirely white!
+
+We next rotate our data based on the rotation values we extracted from
+our prcomp() model.
+
+```{r}
+pca_rotated <- as.data.frame(as.matrix(data_scaled[,1:14]) %*% pca_crime$rotation)
+
+PC1.2r <- ggplot(as.data.frame(pca_crime$x), aes(x = PC1, y = PC2)) + geom_point(weight = 1.5, color = randomColor())
+PC2.3r <- ggplot(as.data.frame(pca_crime$x), aes(x = PC2, y = PC3)) + geom_point(weight = 1.5, color = randomColor())
+PC3.4r <- ggplot(as.data.frame(pca_crime$x), aes(x = PC3, y = PC4)) + geom_point(weight = 1.5, color = randomColor())
+PC4.5r <- ggplot(as.data.frame(pca_crime$x), aes(x = PC4, y = PC5)) + geom_point(weight = 1.5, color = randomColor())
+
+grid.arrange(PC1.2r, PC2.3r, PC3.4r, PC4.5r)
+```
+
+#### Rotation Matrix
+
+The point of the doing the PCA analysis is to transform our Data. We do
+this by using the rotation matrix, when is a **matrix of eigenvectors**.
+We will return to this after we look at the variance and choose the
+number of principal components
+
+```{r}
+head(pca_crime$rotation)
+```
+
+#### Choosing the Number of Principal Components
+
+```{r}
+summary(pca_crime)
+```
+
+In the above summary, we can see the row **"proportion of variance,**"
+which shows what **percent of variance has been explained for each
+number of principal components**.
+
+We can see that PC1 shows the greatest proportion of variance at 38.65%,
+which each subsequent principal component adding more and more until the
+cumulative proportion of variance explains reaches 100% at PC15.
+
+The below plot looks at what percent variance has been explained for
+each number of principal components cumulatively.
+
+```{r}
+## chart showing the cumalitive proprition of variance
+## with each added PC
+plot(summary(pca_crime)$importance[3,], ylab = "Cumulative Proportion of Variance", pch = 16)
+```
+
+The above is similar to the **screeplot**, which helps us decide how
+many PC's we should use to transform our data.
+
+```{r}
+screeplot(pca_crime, type = "line", col = "darkblue")
+```
+
+Using both the screeplot and proportion of variance, **I chose to work
+with 6 Principal Components**. **After 6, the usefulness of each
+principal component does not seem significant**.
+
+### Linear Regression
+
+I now begin to build the **linear model.** From above, I have chosen to
+work with **6 principal components.** I then build a new data frame with
+these principal components and the response variable, crime.
+
+```{r}
+## Extract 6 principle components
+pc_crime <- pca_crime$x[,1:6]
+
+## build new data frame
+pc_crime_c <- cbind(pc_crime, Crime = crimedata[,16])
+
+##create linear model
+pc_lm <- lm(Crime~., data = as.data.frame(pc_crime_c))
+summary(pc_lm)
+```
+
+The output provides the **beta coefficients and significants of our
+principal components.** Based on our model, PC2 and PC6 are not
+statistically significant. We will move forward with all PC's, however.
+
+### Transforming the Data
+
+The next step is to get our **"alphas"** that are in terms of the
+original scaled variables. To do this, we do some matrix multiplication.
+First, I create a data matrix with just the coefficients for my own ease
+of use. I create a separate frame for the **intercept, beta_0**. Then,
+using our **rotation matrix from earlier (pca_crime\$rotation), we
+multiple this through our beta coefficients form our linear model**.
+With our coefficients, we have to be aware not to include the intercept,
+but we DO have to transform it separately.
+
+```{r}
+## Create a data frame with the coefficients
+## the first is for intercept, the second is for all other coefficients
+beta_0 <- pc_lm$coefficients[1]
+betas <- pc_lm$coefficients[-1]
+
+## compute alphas by applying the transformation left to right
+
+alphas <- pca_crime$rotation[,1:6] %*% betas
+alphas
+```
+
+Now we have our alpha values, but we cannot yet use them because they
+are scaled.
+
+```{r}
+## unscaled interept
+uns_beta0 <- beta_0 - sum(alphas * sapply(crimedata[,c(1, 3:15)],mean)/sapply(crimedata[,c(1, 3:15)],sd))
+
+## unscaled alphas, making sure to take into account exclusion of So
+unscaled_alphas <- alphas / sapply(crimedata[,c(1, 3:15)],sd)
+
+```
+
+### Prediction
+
+This table of **alpha values is the coefficients we will apply to our
+test poin**t. We do this through matrix multiplication. Value So will be
+removed from the test point, as it was removed for being a categorical
+variable. Because So is 0 in the test point, removing it from the set
+will not make a difference.
+
+```{r}
+## read in test point
+test_point <- data.frame(M = 14.0, Ed = 10.0, Po1 = 12.0, Po2 = 15.5, LF = 0.640, M.F = 94.0, Pop = 150, NW = 1.1, U1 = 0.120, U2 = 3.6, Wealth = 3200, Ineq = 20.1, Prob = 0.04, Time = 39.0)
+
+## our prediction is the matrix multiplaction of alphas and test points
+## plus the intercept
+prediction <- (as.matrix(test_point) %*% as.matrix(unscaled_alphas)) + uns_beta0
+
+prediction
+```
+
+**Our prediction is 1302.405**
+
+### Conclusion
+
+1.  This linear regression model after isolating the 6 **Principal
+    Components** with the highest variance predicts a crime rate of
+    approximately ***1302.405.*** This prediction seems to be in line
+    with other data points that contain similar predictors.
+
+2.  The categorical variable **So** was excluded before computing the
+    **PCA** and was never reintroduced. It wouldn't have made a
+    difference since its value is 0 in the new observation.
+
+3.  Here's a description of the approach I presented last week in
+    getting to ***Prediction = 892.545.***
+
+    > -   I created three linear models to test the crime data, one with
+    >     all of the data, one with a lower amount of data, and one with
+    >     the response variable transformed by the natural log. I then
+    >     looked at the \$R\^2\$ values and the p-values. A higher $R^2$
+    >     and lower p-value indicates better goodness of fit for our
+    >     model.
+    >
+    > -   I chose to disregard the first model with all variables
+    >     because there was collinearity among two sets of predictor
+    >     variables. While it had the highest $R^2$, I did not trust it.
+    >
+    >     The natural log transformed data set had a lower $R^2$ than
+    >     the othe two, so I also chose to disregard this model. The
+    >     model I chose, with the summary above, has $R^2 = 68%$. This
+    >     is the best fit withoutoverfitting.
+
+4.  My comparison of the **PCA** approach to **linear regression**
+    without it is as follows:
+
+    > -   The PCA approach results in $R^2 = 0.6448$, meaning the model
+    >     accounts for 65% of the variation within the model. The
+    >     p-value is 1.036e-07, which also suggests that this model is
+    >     statistically significant
+    >
+    > -   The $R^2$ in PCA analysis is less than the linear regression
+    >     model from last week, which could suggest that this model is
+    >     not as accurate as the linear regression model.
