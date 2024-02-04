@@ -1,0 +1,167 @@
+---
+title: "Exploratory Data Analysis - US Crime"
+author: "Hannah Pavlovich"
+date: "2024-02-04"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r practice}
+### GOOD PRACTICES ###
+library(outliers)
+library(ggplot2)
+library(gridExtra)
+library(randomcoloR)
+library(car)
+library(DAAG)
+rm(list = ls())
+set.seed(42) # set a seed so it everything be reproducible
+```
+
+
+Criminologists are interested in the effect of punishment regimes on crime rates. To this effect, data has been aggregated on 47 states for various demographic indicators. The Response variable is crime rate: number of offenses per 100,000 population in 1960.
+
+The following performs Exploratory Data Analysis on the set provided, including outlier detection and removal.
+
+#### Check for normality in the model with qq-norm.
+
+```{r}
+### Read in the data
+crimedata <- read.table("data/uscrime.txt", stringsAsFactors = FALSE, header = TRUE)
+## Run crime through qqnorm
+qqnorm(crimedata$Crime, col = "darkblue")
+qqline(crimedata$Crime, col = "red")
+## create a histogram
+hist(crimedata$Crime, xlab = "Crime", main = "Histogram of Crime")
+```
+
+Looking at our data on the crime, it is not normal. The histogram is
+skewed to the left, and the QQ Plot shows deviances from the normal
+line.
+
+#### Histograms, scatterplots, and correlation matrix for each variable.
+
+```{r message=FALSE, warning=FALSE}
+
+## Function to create Histograms
+hist_plot <- function(i){
+  ggplot(crimedata, aes(x = crimedata[,i])) + 
+    geom_histogram( color="black", fill= randomColor()) +  xlab(names(crimedata[i]))
+}
+
+## Return Histograms
+
+  do.call(grid.arrange, lapply(1:15, hist_plot))
+  
+
+```
+
+According to the histograms, most of the data is skewed to the left with
+a fairly normal distribution.
+
+Ed, the mean years of schooling, does not follow this trend, and seems to
+have an almost bi-modal distribution.
+
+Pop, the state population, is completely left skewed with no normal
+distribution.
+
+Wealth is the only histogram that is heavier on the right side.
+
+I next examined the scatterplots to see what the relationships are
+between the variables. We are using multiple variables to predict the
+crime rate, so it is important to see how the predictors relate to one
+another
+
+```{r message=FALSE, warning=FALSE}
+
+## Function to create scatter plots
+scat_plot <- function(i){
+  ggplot(crimedata, aes(x = crimedata[,i], y = Crime)) + 
+    geom_point(weight = 1.5, color = randomColor()) +  xlab(names(crimedata[i]))
+}
+
+## Return scatterplots
+
+  do.call(grid.arrange, lapply(1:15, scat_plot))
+
+```
+
+We can see some linear correlation especially with Po (per capita
+expenditure on police protection) and wealth. There also seems to be a
+non-linear relationship between crime and Pop (state population in 1960
+in hundred thousands), NW (percentage of nonwhites in the population),
+and U1 and U2 (unemployment rates of urban males)
+
+#### Outlier Detection
+
+To check for outliers, the first step is to do an EDA of the data. I
+begin with the summary.
+
+```{r}
+summary(crimedata$Crime)
+```
+
+First inspection shows a Max that is 1,100 points higher than the Median
+and 900 points higher than the third quantile. This suggests there are
+upper outliers. The lower numbers are less extreme.
+
+Next, I make a boxplot to inspect the data
+
+```{r pressure, echo=FALSE}
+ggplot(data = crimedata, aes(y = Crime)) + geom_boxplot()
+```
+
+The boxplot is similar to our summary. By visual inspection, I can posit
+that there are at least two upper outliers.
+
+My last EDA is with a histogram
+
+```{r}
+ggplot(data = crimedata, aes(x=Crime)) + geom_histogram(binwidth = 150, 
+      color = "black", fill = "lightblue") + 
+      geom_vline(xintercept = mean(crimedata$Crime), 
+      color = "red", linetype = "dashed", size = 1
+)
+```
+
+The histogram above plots the Crime data against count, with the red
+dashed line showing the mean of Crimes. Again, we can see that this
+histogram is right-side heavy, suggesting outliers.
+
+Next, I will apply the grubbs test to see if these points are actually
+outliers, and to see if they will change the data.
+
+```{r}
+print("Grubbs Test for Highest Value:")
+grubbs.test(crimedata$Crime)
+
+print("Grubbs Test for Lowest Value")
+grubbs.test(crimedata$Crime, opposite = TRUE)
+
+```
+
+Above, I ran the Grubbs Tests to check for outliers on the highest and
+lowest ends. According to this test, our high point 1993 is NOT an
+outlier with $\alpha$ = 0.05.
+
+To be certain, I wanted to plot the crime data against the other
+predictors, one by one.
+
+```{r}
+library(gridExtra)
+
+linear_plot <- function(i){
+  ggplot(crimedata, aes(x = crimedata[,i], y = Crime, group = 1)) + 
+    geom_point(size = 1) + geom_line() + xlab(names(crimedata[i]))
+}
+  
+  do.call(grid.arrange, lapply(1:15, linear_plot))
+
+```
+
+By quick inspection, plots against Po1 and Po2 imply some sort of
+linearity. While not getting too deep into this, I can reject the
+hypothesis that an outlier exists.
