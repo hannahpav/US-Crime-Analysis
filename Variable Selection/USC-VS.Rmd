@@ -1,0 +1,442 @@
+---
+title: "Variable Selection Analysis - US Crime"
+author: "HP"
+date: "2024-02-05"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r include=FALSE}
+### GOOD PRACTICES ###
+library(tidyverse)
+library(caret)
+library(leaps)
+library(ggplot2)
+library(gridExtra)
+library(MLmetrics)
+library(glmnet)
+library(tidyverse)
+
+rm(list = ls())
+set.seed(42) # set a seed so it everything be reproducible  
+```
+
+
+*Using crime data from the file uscrime.txt
+(<http://www.statsci.org/data/general/uscrime.txt,> description at
+[http://www.statsci.org/data/general/uscrime.html),](http://www.statsci.org/data/general/uscrime.html),)
+
+The purpose of this portion is to find the best model using variable selection techniques Stepwise Regression, LASSO, and Elastic Net
+
+
+First, we read in and split the data.
+
+```{r}
+### Read in the data
+crimedata <- read.table("data/uscrime.txt", stringsAsFactors = FALSE, 
+                        header = TRUE)
+
+### Create training and testing sets for the data at 70% and 30%
+sample <- sample(c(TRUE, FALSE), nrow(crimedata), replace=TRUE, prob=c(0.8,0.2))
+ctrain <- crimedata[sample, ]
+ctest <- crimedata[!sample, ]
+```
+
+## Stepwise Regression
+
+### Build Step Regression on Trained Data
+
+To complete the stepwise regression, I chose to use the train() function
+from the caret package. This function uses cross-validation to select
+the best number of variables. The parameters I set in the fucntion are:
+method = "leapseq" -\> choses the stepwise regression function tuneGrid
+= data.frame(nvmax = 1:10) -\>returns models with number of predictors
+from 1 to 10 trControl = train.control -\> performs the cross validation
+based on the parameters set below
+
+```{r train for stepwise}
+
+## set up repeated k-fold cross-validation
+train.control <- trainControl(method = "cv", number = 7)
+
+## Train the model and perform step regression
+ctrain_steps <- train(Crime ~., data = ctrain, method = "leapSeq", 
+                      tuneGrid = data.frame(nvmax = 1:10), 
+                      trControl = train.control)
+ctrain_steps$results
+
+```
+
+The above output gives nvmax, the number of predictors used, RMSE and
+MAE. The lower these values the better the model. Rsquared is also
+defined in the model.
+
+### Visual Analysis
+
+To better visualize the data, I will make three plots, RMSE vs No of
+Predictors, Rsquared vs No of Predictors, and MAE vs No of predictors
+
+```{r}
+## extract the table of results
+res <- ctrain_steps$results
+
+a <- ggplot(res, aes(x = nvmax, y= Rsquared)) + geom_point(color = "blue") +
+  geom_line(color = "darkblue") + scale_x_continuous(name = "No of Variables",
+                                                     breaks = seq(0,10,1))
+b <- ggplot(res, aes(x = nvmax, y= RMSE)) + geom_point(color = "green") +
+  geom_line(color = "darkgreen") + scale_x_continuous(name = "No of Variables",
+                                                      breaks = seq(0,10,1))
+c <- ggplot(res, aes(x = nvmax, y= MAE)) + geom_point(color = "pink") + 
+  geom_line(color = "red") + scale_x_continuous(name = "No of Variables",
+                                                breaks = seq(0,10,1))
+
+grid.arrange(a,b,c, nrow = 2)
+
+```
+
+Visually, the highest R-squared and lowest RMSE and MAE values are at
+the same node, P = 1. I will now check the output data to see if the
+model agrees. The optimal number of variables is found with \$besttune
+
+### Extra Best Value
+
+```{r}
+ctrain_steps$bestTune
+
+```
+
+The model agrees with our visual inspection. One predictor seems very
+limited, however, so I will create a linear model only using the best
+coefficient and test it with our testing set.
+
+```{r}
+## Find the best coefficient
+coef(ctrain_steps$finalModel, 1)
+
+```
+
+### Build Linear Regression Model
+
+```{r}
+## create linear model with one predictor
+lm_1 <- lm(Crime ~ Po1, data = ctrain)
+summary(lm_1)
+```
+
+Next I test the data by first finding the predicted values from our test
+model and the actual values.
+
+### Test against Testing Set
+
+```{r}
+## calculate probability of default for each individual in test dataset
+predicted <- predict.lm(lm_1, ctest)
+
+## test against real responses
+lm_mape <- MAPE(predicted, ctest$Crime)
+
+paste0("Accuracy with 1 variable = ", round(lm_mape * 100, 2), "%")
+
+```
+
+This accuracy is VERY low. From the visual graphs before, the second
+best guess was with three variables. I will run this again using 3
+variables instead of 1.
+
+### Rerun experiment with 3 Variables
+
+```{r}
+## set up repeated k-fold cross-validation
+train.control <- trainControl(method = "cv", number = 7)
+
+## Train the model and perform step regression, set nvmax = 3
+ctrain_steps <- train(Crime ~., data = ctrain, method = "leapSeq", tuneGrid = data.frame(nvmax = 3), trControl = train.control)
+ctrain_steps$results
+
+## Find the best coefficients
+coef(ctrain_steps$finalModel, 3)
+```
+
+Now we have the variables to build the new regression model and test it
+agains the original data.
+
+```{r}
+
+## create linear model with three predictos
+lm_3 <- lm(Crime ~ Ed + Po1 + Ineq, data = ctrain)
+
+## calculate predicted values each individual in test dataset
+predicted <- predict.lm(lm_3, ctest)
+
+## test against real responses
+lm_mape_3 <- MAPE(predicted, ctest$Crime)
+
+paste0("Accuracy with 3 variables = ", round(lm_mape_3 * 100, 2), "%")
+
+```
+
+This accuracy is even lower, confirming using 1 variable provides the
+best model.
+
+### Conclusion
+
+Using Stepwise Regression, the best model comes from using one variable,
+Po1. It provies a model with R-squared = 0.6152050 and Accuracy =
+25.35%.
+
+## Lasso
+
+### Run data in glmnet
+
+Lasso is a Variable Selection technique that adds constraints to the
+regression equation. The sum of all coefficients cannot pass threshold
+T. In order to use glmet to perform this analysis, need to scale the
+predictors in the training data.
+
+```{r paged.print=FALSE}
+## glmet requires R matrices to perform. I will create two matrices, one for the prediction variables and one for the response variables
+## scale only the predictors
+pred <- as.matrix(scale(ctrain[,-16]))
+resp <- as.matrix(ctrain[,16])
+
+## run the glmnet with alpha = 1, which will nullify the quadratic expression
+lasso_c = glmnet(pred, resp, alpha = 1)
+plot(lasso_c)
+print(lasso_c)
+
+
+```
+
+The data shows the number of variables against the deviance explanined
+at the value of $\lambda$, the penalty term for Lasso. To sample what
+one of the outputs is, I will extract the coefficients for $\lambda$ =
+0.1
+
+```{r}
+coef(lasso_c, s = 0.1)
+```
+
+In this version, only 5 variables are being used.
+
+### Extract optimal penalty terms
+
+To chose the optimum $\lambda$, we can use the cross validation
+component in the glmnet pakcage.
+
+```{r}
+## use cv.glmnet to extract optimum lambda
+lasso_fit <- cv.glmnet(pred, resp)
+plot(lasso_fit)
+```
+
+This is the plot of the cross-validation curve along the lambda sequence
+(error bars). The two vertical lines are lambda.min, the value that
+gives minimum mean cross-validation error, and lambda.1se, which gives
+the most regularized model.
+
+I will extract the both lambda.min and lambda.lse and their
+coefficients.
+
+```{r}
+## coefficients for lambda.min
+c("<------lambda.min------>")
+coef(lasso_fit, s = "lambda.min")
+
+## coefficients for lambda.1se
+c("<------lambda.1se------>")
+coef(lasso_fit, s = 'lambda.1se')
+```
+
+The lowest cross validation (lambda.min), usses many more coefficients
+than the most regularized model, lambda.lse. Using the built in cross
+validation, I next test the data using predictions from the models. I do
+one for lambda.min and one for lambda.1se.
+
+### Test New Models
+
+```{r}
+## prediction for lambda.min
+predict_min <- predict(lasso_fit, newx = pred, s = "lambda.min")
+
+## test against real responses
+mape_min <- MAPE(predict_min, ctrain$Crime)
+
+paste0("Accuracy with lambda.min and 5 variables = ", round(mape_min * 100, 2), 
+       "%")
+
+## prediction for lambda.1se
+predict_1se <- predict(lasso_fit, newx = pred, s = "lambda.1se")
+
+## test against real responses
+mape_1se <- MAPE(predict_1se, ctrain$Crime)
+
+paste0("Accuracy with lambda.1se and 4 variables = ", round(mape_1se * 100, 2), 
+       "%")
+
+```
+
+The model using the "most regularized" lambda value has higher accuracy,
+and is perhaps the more reliable model.
+
+```{r}
+## extract coefficients
+coef(lasso_fit, s = "lambda.1se")
+
+```
+
+### Build Regression Model
+
+The coefficients used in this model are So, Po1, LF, and M.F. I build a
+regression model on the training data with these predictors.
+
+```{r}
+lasso_lm <- lm(Crime ~ So + Po1 + LF + M.F, data = ctrain)
+summary(lasso_lm)
+```
+
+### Test against testing set
+
+Next I test this data against the training testing set
+
+```{r}
+
+## prediction using the new model.
+predict_lasso <- predict(lasso_lm, ctest)
+
+## test against real responses
+mape_lasso <- MAPE(predict_lasso, ctest$Crime)
+
+paste0("Accuracy of lasso model to testing set = ", round(mape_lasso * 100, 2), 
+       "%")
+
+```
+
+### Conclusion
+
+This accuracy is better than used for the stepwise Regression, and it
+keeps So, Po1, LF, and M.F. as the variables.
+
+## Elastic Net
+
+Elastic is a Variable Selection technique that adds constraints to the
+regression equation: the absolute values of the sums of all coefficients
+and their squares. I use glmnet to perform this analysis, beginning
+midway through the analysis for Lasso.
+
+### Build Models with Different $\alpha$ 's
+
+To perform Elastic Net regression, we will use the same beginning as
+used in the Lasso steps. We will deviate at the start of the cross
+validation, where I will test different levels of alpha.
+
+```{r}
+
+## the foldid parameter to test for different alpha's
+foldid <- sample(1:7, size = length(resp), replace = TRUE)
+
+## create 5 models with different alpha's
+cv_1 <- cv.glmnet(pred, resp, foldid = foldid, alpha = .1)
+cv_3 <- cv.glmnet(pred, resp, foldid = foldid, alpha = .3)
+cv_5 <- cv.glmnet(pred, resp, foldid = foldid, alpha = .5)
+cv_7 <- cv.glmnet(pred, resp, foldid = foldid, alpha = .7)
+cv_9 <- cv.glmnet(pred, resp, foldid = foldid, alpha = .9)
+
+plot(cv_1, sub = "Alpha = 0.1")
+plot(cv_3, sub = "Alpha = 0.3")
+plot(cv_5, sub = "Alpha = 0.5")
+plot(cv_7, sub = "Alpha = 0.7")
+plot(cv_9, sub = "Alpha = 0.9")
+
+
+```
+
+### Test for Accuracy
+
+I created a function to extract the accuracy for the models.
+
+```{r}
+
+accuracy <- function(cv_model){
+  predict_min <- predict(cv_model, newx = pred, s = "lambda.min")
+  mape_min <- MAPE(predict_min, ctrain$Crime)
+  paste0("Accuracy with lambda.min for ",deparse(substitute(cv_model)), " is ", round(mape_min * 100, 2), "%")
+  ## prediction for lambda.1se
+  predict_1se <- predict(cv_model, newx = pred, s = "lambda.1se")
+  ## test against real responses
+  mape_1se <- MAPE(predict_1se, ctrain$Crime)
+  cat("Accuracy with lambda.1se for " , deparse(substitute(cv_model)), " is ", round(mape_1se * 100, 2), "%\n",
+         "Accuracy with lambda.min for ",deparse(substitute(cv_model)), " is ", round(mape_min * 100, 2), "%\n")
+}
+
+accuracy(cv_1)
+accuracy(cv_3)
+accuracy(cv_5)
+accuracy(cv_7)
+accuracy(cv_9)
+
+```
+
+Above we have the accuracies for the moels at different alpha values. Th
+largest accuracy is when alpha = 90%.
+
+I will use this value and corresponding $\lambda$ to create the linear
+model against which I test the original data.
+
+```{r}
+## define best model
+lasso_fit_e <- cv.glmnet(pred, resp, alpha = .9)
+## extract coefficients
+coef(lasso_fit_e, s = "lambda.1se")
+
+
+```
+
+### Build Regression Model
+
+This model only uses the Po1 coefficient, so I build a regression model
+on the training data with these predictors.
+
+```{r}
+lasso_lm_e <- lm(Crime ~ Po1, data = ctrain)
+summary(lasso_lm_e)
+```
+
+### Test against testing set
+
+Next I test this data against the training testing set
+
+```{r}
+
+## prediction using the new model.
+predict_lasso_e <- predict(lasso_lm_e, ctest)
+
+## test against real responses
+mape_lasso_e <- MAPE(predict_lasso_e, ctest$Crime)
+
+paste0("Accuracy of lasso model to testing set = ", 
+       round(mape_lasso_e * 100, 2), "%")
+
+```
+
+### Conclusion
+
+The Elastic Net model has a lower accuracy than the Lasso Method. This
+makes sense, as the accuracy of the model as the $\alpha$ value was
+increasing, slowly getting closer to $\alpha$ = 1, the Lasso model.
+
+## Conclusion
+
+The three models gave two different conclusions. The Stepwise Regression
+and Elastic Net method both kept only one variable, Po1, while the Lasso
+Method retained variables So Po1, LF, and M.F.
+
+My testing showed that the Lasso Method had a slightly more accuracte
+model than the other two. Having more variables, while it does introduce
+more bias, counteracts the underfitting that can happen when there is
+only one variable. Intuition says that only one variable is enough to
+build a new regression model. I would suggest using the Lasso Model and
+variables So, Po1, LF, and M.F.

@@ -1,0 +1,215 @@
+---
+title: "Regression Tree and Random Forest - US Crime"
+author: "HP"
+date: "2024-02-05"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r include=FALSE}
+### GOOD PRACTICES ###
+library(rsample)     # data splitting 
+library(dplyr)       # data wrangling
+library(rpart)       # performing regression trees
+library(rpart.plot)  # plotting regression trees
+library(randomForest)
+library(glm2)
+library(pscl)
+library(caret)
+library(plotROC)
+library(car)
+
+
+rm(list = ls())
+set.seed(42) # set a seed so it everything be reproducible  
+```
+
+*Using crime data from the file uscrime.txt
+(<http://www.statsci.org/data/general/uscrime.txt,> description at
+[http://www.statsci.org/data/general/uscrime.html),](http://www.statsci.org/data/general/uscrime.html),)
+
+The purpose of this portion is to find the best model  using (a) a regression tree model, and (b) a
+random forest model.
+
+```{r}
+### Read in the data
+crimedata <- read.table("data/uscrime.txt", stringsAsFactors = FALSE, header = TRUE)
+```
+
+### a) Regression Tree Model
+
+#### Creating the Model
+
+To create the regression tree model, I will use rpart. I then plot a
+visualization of the tree to get a general idea of the model.
+
+```{r create rpart model}
+set.seed(42)
+## Use rpart to perform the regression model tree
+crimeR <- rpart(
+  formula = Crime ~ .,
+  data    = crimedata,
+  method  = "anova",
+  )
+
+## plot the tree
+rpart.plot(crimeR, main="Decision Tree Graph")
+#crimeR
+
+```
+
+This graph gives us 4 leaves and uses three variables: PO1, Pop, and NW.
+The interpretation of the leaves are:
+
+-   When **Po1 \< 7.7** and **Pop \< 23**: The mean crime rate is
+    **550**, and it covers **26%** of the data
+
+-   When **Po1 \< 7.7** and **Pop \> 23**: The mean crime rate is
+    **800**, and it covers **23%** of the data
+
+-   When **Po1 \> 7.7** and **NW \< 7.7**: The mean crime rate is
+    **887**, and it covers **21%** of the data
+
+-   When **Po1 \> 7.7** and **NW \> 7.7**: The mean crime rate is
+    **1305**, and it covers **30%%** of the data
+
+The table is a written summary of the decision tree graph.
+
+Next is the **pruning table**, which gives more information regarding
+the accuracy of the data
+
+```{r cp table}
+crimeR$cptable # output pruning table
+```
+
+The PruningTable depicts information about pruning from the rpart
+algorithm. There are two errors, **rel error** and **xerror**. rel error
+is the error for predictions within our model. **xerror is the
+cross-validation error** (rpart does cross validation for us). xerror is
+more useful in predicting the accuracy of this model.
+
+In selecting the the level of our tree, the rule of thumb is to select
+the lowest level where **rel_error + xstd \< xerror**. This would give
+us the 2nd level with an **xerror of 0.911.**
+
+Last, we look at the **cost complexity** graph, which tells us how much
+error is gained or lost for each level of complexity.
+
+```{r}
+plotcp(crimeR) # output cost complexity graph
+
+```
+
+This graph gives the same information of the pruning table: the model
+would be more **accurate with two levels instead of four**
+
+#### Fitting the Model
+
+The xerror is very high with this model, which means the accuracy is
+low. To attempt a more accurate model, the parameters in rpart allow for
+manipulation of the parameters.
+
+minsplit: the minimum number of data points required to attempt a split
+before it is forced to create a terminal node. The model has very few
+splits, and I wanted to force a few more, so I changed minsplit to 8.
+
+maxdepth: the maximum number of internal nodes between the root node and
+the terminal nodes. I set mine to 15.
+
+```{r crimeR try again}
+## Use rpart to perform the regression model tree with added parameters
+set.seed(13)
+crimeA <- rpart(
+  formula = Crime ~ .,
+  data    = crimedata,
+  method  = "anova",
+  control = list(minsplit = 8, maxdepth = 15)
+  )
+
+## plot the tree
+rpart.plot(crimeA, main="Decision Tree Graph")
+```
+
+The tree begins in the same way as our first tree. This one however,
+splits NW \> 7.7 into another branch, LV \<0.57. In this last leaf: when
+**LF \< .057**: The mean crime rate is **1115**, and it covers **15%%**
+of the data when **LF \> .057**: The mean crime rate is **1495**, and it
+covers **15%%** of the data
+
+Now we look at the **pruning table** to see if the accuracy has changed.
+
+```{r}
+crimeA$cptable
+```
+
+The xerror values decrease as we add nodes in this table. However, if we
+follow the **rule of thumb**, then we still choose the second node,
+where **xerror = 1.02.** And we check it against the **complexity
+graph**
+
+```{r}
+plotcp(crimeA)
+```
+
+Here, the data shows a better relative error as the the nodes increase.
+However, these models can fall into over fitting with too many nodes,
+which is what I think is happening here.
+
+**The best model is the default with two nodes**
+
+### b) Random Forest Model
+
+#### Creating the Model
+
+To fit the data to a random forest model, I will use the randomForest
+package. First, create the model and output the data.
+
+```{r randomforest model}
+CrimeF<- randomForest(Crime~., data = crimedata) #create model
+CrimeF
+```
+
+Important here is the **mean of square residuals: 88903.6** and **% Var
+explained : 39.27** Compared with our tree regression model, this is
+immediatley much better. Our regression model was best an error rate of
+about 98%, which means only 2% accuracy! The number of variables at each
+split tells us how many variables were used for each branch of the tree.
+The number of trees is the size of the forest, here it was 500
+
+This is further explained in the chart below
+
+```{r}
+plot(CrimeF)
+```
+
+We can see how the *error decreases as the number of trees increases*.
+Looking at the graph, however, I can see that the minimum error is
+actually at about 250 trees, as the graph error increases from there to
+500. With this information, I will run the model again.
+
+#### Fitting the Model
+
+As well as changing the number of trees from 500 to 250, I will change
+the split at each node from 5 to 4. I am doing this because the previous
+model suggested using a smaller amount of data
+
+```{r}
+CrimeFA<- randomForest(Crime~., data = crimedata, mtry = 4, ntree = 250)
+CrimeFA
+
+```
+
+With this new inormation, **mean of square residuals: 84706.16** and **%
+Var explained : 42.14**, which is better than the model using 500 trees.
+
+#### Conclusion
+
+**The Random Forest model** is the better fitting model when used with a
+**forest of 250 and 4 variables at each split.** This model explains for
+**41.57%** of variance. However, these are both worst than the **PCA
+model** from last week, The PCA approach resulted in\*\*
+$R^2 = 0.6448$\*\*, meaning the model accounts for 65% of the variation
+within the model. ThE PCA model is the most accurate model

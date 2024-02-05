@@ -1,0 +1,1409 @@
+---
+title: "USCrime"
+author: "HP"
+date: "2024-02-02"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# ISYE 6501 Homework 3
+
+```{r practice}
+### GOOD PRACTICES ###
+library(outliers)
+library(ggplot2)
+rm(list = ls())
+set.seed(42) # set a seed so it everything be reproducible
+```
+
+## Question 5.1
+
+*Using crime data from the file uscrime.txt
+(<http://www.statsci.org/data/general/uscrime.txt,> description at
+[http://www.statsci.org/data/general/uscrime.html),](http://www.statsci.org/data/general/uscrime.html),)
+test to see whether there are any outliers in the last column (number of
+crimes per 100,000 people). Use the grubbs.test function in the outliers
+package in R.*
+
+```{r}
+crimedata <- read.table("uscrime.txt", stringsAsFactors = FALSE, header = TRUE)
+```
+
+To check for outliers, the first step is to do an EDA of the data. I
+begin with the summary.
+
+```{r}
+summary(crimedata$Crime)
+```
+
+First inspection shows a Max that is 1,100 points higher than the Median
+and 900 points higher than the third quantile. This suggets there are
+upper outliers. The lower numbers are less extreme.
+
+Next, I make a boxplot to inspect the data
+
+```{r pressure, echo=FALSE}
+ggplot(data = crimedata, aes(y = Crime)) + geom_boxplot()
+```
+
+The boxplot is similar to our summary. By visual inspection, I can posit
+that there are at least two upper outliers.
+
+My last EDA is with a histogram
+
+```{r}
+ggplot(data = crimedata, aes(x=Crime)) + geom_histogram(binwidth = 150, 
+      color = "black", fill = "lightblue") + 
+      geom_vline(xintercept = mean(crimedata$Crime), 
+      color = "red", linetype = "dashed", size = 1
+)
+```
+
+The histogram above plots the Crime data against count, with the red
+dashed line showing the mean of Crimes. Again, we can see that this
+histogram is right-side heavy, suggesting outliers.
+
+Next, I will apply the grubbs test to see if these points are actually
+outliers, and to see if they will change the data.
+
+```{r}
+print("Grubbs Test for Highest Value:")
+grubbs.test(crimedata$Crime)
+
+print("Grubbs Test for Lowest Value")
+grubbs.test(crimedata$Crime, opposite = TRUE)
+
+```
+
+Above, I ran the Grubbs Tests to check for outliers on the highest and
+lowest ends. According to this test, our high point 1993 is NOT an
+outlier with $\alpha$ = 0.05. Watching Sokol's lecture, this would make
+sense based on what we know about large amounts of data and the
+likelihood of points outside the norm.
+
+To be certain, I wanted to plot the crime data against the other
+predictors, one by one.
+
+```{r}
+library(gridExtra)
+
+linear_plot <- function(i){
+  ggplot(crimedata, aes(x = crimedata[,i], y = Crime, group = 1)) + 
+    geom_point(size = 1) + geom_line() + xlab(names(crimedata[i]))
+}
+  
+  do.call(grid.arrange, lapply(1:15, linear_plot))
+
+```
+
+By quick inspection, plots against Po1 and Po2 imply some sort of
+linearity. While not getting too deep into this, I can reject the
+hypothesis that an outlier exists.
+
+## Question 8.2
+
+*Using crime data from <http://www.statsci.org/data/general/uscrime.txt>
+(file uscrime.txt, description at
+<http://www.statsci.org/data/general/uscrime.html> ), use regression (a
+useful R function is lm or glm) to predict the observed crime rate in a
+city with the following data:*
+
+*M = 14.0 So = 0 Ed = 10.0 Po1 = 12.0 Po2 = 15.5 LF = 0.640 M.F = 94.0
+Pop = 150 NW = 1.1 U1 = 0.120 U2 = 3.6 Wealth = 3200 Ineq = 20.1 Prob =
+0.04 Time = 39.0*
+
+*Show your model (factors used and their coefficients), the software
+output, and the quality of fit.*
+
+*Note that because there are only 47 data points and 15 predictors,
+you'll probably notice some overfitting. We'll see ways of dealing with
+this sort of problem later in the course.*
+
+```{r include=FALSE}
+### GOOD PRACTICES ###
+library(outliers)
+library(ggplot2)
+library(gridExtra)
+library(randomcoloR)
+library(car)
+library(DAAG)
+
+rm(list = ls())
+set.seed(42) # set a seed so it everything be reproducible  
+```
+
+#### Test Point
+
+Before doing anything, let's set up our test point!
+
+```{r}
+test_point = data.frame(M = 14.0, So = 0, Ed = 10.0, Po1 = 12.0, Po2 = 15.5,
+                        LF = 0.640, M.F = 94.0, Pop = 150, NW = 1.1, U1 = 0.120,
+                        U2 = 3.6, Wealth = 3200, Ineq = 20.1, Prob = 0.04, Time = 39.0)
+```
+
+### Exploratory Data Analysis
+
+First, let's do some Exploratory Data Analysis and get a good look at
+the data we are dealing with.
+
+Check for normality in the model with qq-norm.
+
+```{r}
+### Read in the data
+crimedata <- read.table("uscrime.txt", stringsAsFactors = FALSE, header = TRUE)
+## Run crime through qqnorm
+qqnorm(crimedata$Crime, col = "darkblue")
+qqline(crimedata$Crime, col = "red")
+## create a hitsogram
+hist(crimedata$Crime, xlab = "Crime", main = "Histogram of Crime")
+```
+
+Looking at our data on the crime, it is not normal. The histogram is
+skewed to the left, and the QQ Plot shows deviances from the normal
+line.
+
+I next plot the histograms, scatterplots, and correlation matrix below
+for each variable.
+
+```{r message=FALSE, warning=FALSE}
+
+## Function to create Histograms
+hist_plot <- function(i){
+  ggplot(crimedata, aes(x = crimedata[,i])) + 
+    geom_histogram( color="black", fill= randomColor()) +  xlab(names(crimedata[i]))
+}
+
+## Return Hisograms
+
+  do.call(grid.arrange, lapply(1:15, hist_plot))
+  
+
+```
+
+According to the histograms, most of the data is skewed to the left with
+a fairly nomal distribution.
+
+Ed, the mean years of schooling, does not follow this tren, and seems to
+have an almost bimodal distribution.
+
+Pop, the state population, is completely left skewed with no normal
+distribution.
+
+Wealth is the only histogram that is heavier on the right side.
+
+I next examined the scatterplots to see what the relationships are
+between the variables. We are using multiple variables to predict the
+crime rate, so it is important to see how the predictors relate to one
+another
+
+```{r message=FALSE, warning=FALSE}
+
+## Function to create scatter plots
+scat_plot <- function(i){
+  ggplot(crimedata, aes(x = crimedata[,i], y = Crime)) + 
+    geom_point(weight = 1.5, color = randomColor()) +  xlab(names(crimedata[i]))
+}
+
+## Return scatterplots
+
+  do.call(grid.arrange, lapply(1:15, scat_plot))
+
+```
+
+We can see some linear correlatoin especially with Po (per capita
+expenditure on police protection) and wealth. There also seems to be a
+non-linear relationship between crime and Pop (state population in 1960
+in hundred thousands), NW (percentage of nonwhites in the population),
+and U1 and U2 (unemployment rates of urban males)
+
+### Linear Regression Analysis - All Predictors
+
+We now look at the regression line using the lm() feature.
+
+```{r}
+crime_lm_all <- lm(Crime ~., data = crimedata) # create a linear model
+summary(crime_lm_all) # output summer
+```
+
+The summary here gives us the residual standard error, multiple
+R-Squared, and adjusted R-squared. We will use the adjusted R-squared
+because we are using multiple attributes in this model. Our adjusted
+R-squared is 0.7078, or 70.78%, which means that this model indicates
+70.78% of the variability in the data. This number is pretty good, but
+let's see if we can make it better!
+
+The output provides us with estimates for the coefficients for the
+linear model and information and guesses at their statistical
+signficances, the p-values. I am most interested in the low p-values as
+these indicate higher statistical significance
+
+```{r}
+which(summary(crime_lm_all)$coeff[,4]<0.05) #extracts which variables have p-values below alpha = 0.05
+```
+
+The above code gives us the M, Ed, Ineq, and Prob have the highest
+statistical significance the relationship to the response variable,
+crime. This is interesting, but not particularly helpful for building
+our model!
+
+### Linear Regression Analysis - Selected Predictors
+
+After running on all the data to get an idea of the general model, I
+looked back at the information on this data set. There are two predictor
+variables I will not include in the next model:
+
+1.  Po2: per capita expenditure on police protection in 1959
+
+    -   I choose not to include this because it is almost the same as
+        the data for Po1. Because there is such strong correlation, it
+        will overfit the data.
+
+2.  U2: unemployment rate of urban males 35-39
+
+    -   I choose not to include this for the same reasons as for Po2.
+        There is a strong colinearity between U1 and U2, and including
+        them both would overfit the data.
+
+Then I run another linear model to see if it provides a better fit.
+
+```{r}
+## create the selective linear model
+crime_lm <- lm(Crime ~ M + So + Ed + Po1 + LF + M.F + Pop + NW + U1 + Wealth +
+                 Ineq + Prob + Time, data = crimedata) 
+summary(crime_lm)
+```
+
+Our Adjusted R-Squared here is 0.6804, which is less than the one for
+the other predictor. This model is better representative of the data,
+though, because it removes the two predictor variables that were
+overitting the data.
+
+### Goodness of Fit - Residual Analysis
+
+Next, we do a goodness of fit test to see how well this model actually
+fits the data.
+
+During our EDA, we did an analysis not related to residuals, like the
+scatterplot analysis. We checked the linearity assumption during the EDA
+and found that it did not hold for most predictor variables, but there
+was some fit.
+
+#### Constance Variance Assumption
+
+```{r}
+resids = rstandard(crime_lm) # find standard residuals
+#plot residuals against the fitted variables for constant variance
+plot(x = crime_lm$fitted.values, y = resids, xlab = ('Fitted Values'), 
+     ylab = ("Residuals"), col = "blue")
+
+```
+
+We want to check if $\sigma^2$ is constant across the model. The
+relatoinship between fitted values and residuals is not consistent, so
+it does not pass the constant variance assumption. However, the constant
+variance could be much worse.
+
+#### Normality Assumption
+
+If the linear model holds, the distribution of the residuals should be
+normal. To check this, we do a qqnorm plot and histogram plot.
+
+```{r}
+hist(resids, border = "black", col = "lightblue", main = "Histogram of Residuals")
+
+#check normality assumption with qqplot
+qqnorm(resids, col = "darkblue")
+qqline(resids, col = "red")
+
+```
+
+Looking at this distribution, it looks almost normal, but the spread at
+the tails is not correct. The Normal QQ Plot does not stick to the line,
+especially at the tails. For these reasons, the normality assumption
+does not hold.
+
+#### Independence Assumption
+
+```{r}
+plot(x = resids, y =  crime_lm$fitted.values, xlab = ('Fitted Values'), 
+     ylab = ("Residuals"), col = "blue") 
+```
+
+Here we are checking for uncorrelated errors. There does not look like
+their is any clumping, which means that there are not any correlated
+errors, which means our errors are independent of one another.
+
+### Transform the Data
+
+While there are more tests we can run, transforming the data is the next
+step as the model is not holding well with the assumptions.
+
+```{r}
+bc <- boxCox(crime_lm, lambda = seq(-2, 2, 1/10))
+lambda <- bc$x[which.max(bc$y)]
+lambda_round <- round(lambda*2)/2
+bc
+paste("ideal lambda = ", lambda_round)
+```
+
+According to this, the ideal $\lambda$ is 0, which suggestions we do a
+log transformation on the data. Should we try it?
+
+```{r}
+## Create new linear model using the log of crime (response variable)
+crime_t = lm(log(Crime)~ M + So + Ed + Po1 + LF + M.F + Pop + NW + 
+    U1 + Wealth + Ineq + Prob + Time, data =crimedata)
+summary(crime_t)
+```
+
+The summary here gives us a higher P-value and lower adjusted R-squared,
+which means that the model is less correct than before the transform.
+However, we can transform ALL data, not just the response. Let's stop
+and go back to before!
+
+### Conclusion: Predicting the Model
+
+Now we use our test point using the limited linear model (without Po2
+and U2) to predict the data. Here is the summary of that model again:
+
+```{r}
+summary(crime_lm)
+```
+
+Now let's get to our prediction!
+
+```{r}
+## create a prediction based on the crime_lm linear model, which is an 
+## untransformed model with two predictor variables removed
+cat("Prediction for Test Point =", predict(crime_lm, test_point))
+```
+
+**My prediction for the test data set is 892.545.**
+
+#### Is the prediction any good?
+
+I created three linear models to test the crime data, one with all of
+the data, one with a lower amount of data, and one with the response
+variable transformed by the natural log. I then looked at the $R^2$
+values and the p-values. A higher $R^2$ and lower p-value indicates
+better goodness of fit for our model.
+
+I chose to disregard the first model with all variables because there
+was collinearity among two sets of predictor variables. While it had the
+highest $R^2$, I did not trust it.
+
+The natural log transformed data set had a lower $R^2$ than the other
+two, so I also chose to disregard this model. The model I chose, with
+the summary above, has $R^2$ **= 68%**. This is the best fit without
+overfitting.
+
+
+## Question 9.1
+
+*Using the same crime data set uscrime.txt as in Question 8.2, apply
+Principal Component Analysis and then create a regression model using
+the first few principal components. Specify your new model in terms of
+the original variables (not the principal components), and compare its
+quality to that of your solution to Question 8.2. You can use the R
+function prcomp for PCA. (Note that to first scale the data, you can
+include scale. = TRUE to scale as part of the PCA function. Don't forget
+that, to make a prediction for the new city, you'll need to unscale the
+coefficients (i.e., do the scaling calculation in reverse)!)*
+
+## Solution
+
+```{r include=FALSE}
+### GOOD PRACTICES ###
+library(outliers)
+library(ggplot2)
+library(gridExtra)
+library(randomcoloR)
+library(car)
+library(corrplot)
+library(clusterSim)
+library(magrittr)
+library(factoextra)
+library(pls)
+library(DAAG)
+library(GGally)
+
+
+rm(list = ls())
+set.seed(42) # set a seed so it everything be reproducible  
+```
+
+### Exploratory Data Analysis
+
+First, let's do some Exploratory Data Analysis and get a good look at
+the data we are dealing with.
+
+```{r}
+### Read in the data
+crimedata <- read.table("uscrime.txt", stringsAsFactors = FALSE, header = TRUE)
+```
+
+I also make a scatterplot of ALL variables against Crime to see where
+there is linearity.
+
+```{r}
+## Function to create scatter plots
+scat_plot <- function(i){
+  ggplot(crimedata, aes(x = crimedata[,i], y = Crime)) + 
+    geom_point(weight = 1.5, color = randomColor()) +  xlab(names(crimedata[i]))
+}
+
+## Return scatterplots
+
+  do.call(grid.arrange, lapply(1:15, scat_plot))
+```
+
+Let's visualize the data, specifically the **correlation of the data.**
+
+```{r}
+res <- cor(crimedata[,1:15], method="pearson")
+corrplot::corrplot(res, method= "square", order = "AOE", tl.pos = 'n')
+```
+
+From the above, we have a better understanding of how the predictor
+variables are correlated. Some of them have very strong correlations
+while many of them are near-zero.
+
+Our goal in using PCA-analysis is to reduce the correlation between
+these predictor variables to reduce overfitting.
+
+### Scaling the Data
+
+Next I scale the data, to center the data around 0-0 and get a more
+sensible scale of the data. I replot the correlation matrix and
+exploratory models.
+
+```{r}
+### Scale the data
+data_scaled_t <- as.data.frame(scale(crimedata))
+```
+
+```{r}
+## Function to create scatter plots with new data
+scat_plot <- function(i){
+  ggplot(data_scaled_t, aes(x = data_scaled_t[,i], y = Crime)) + 
+    geom_point(weight = 1.5, color = randomColor()) +  xlab(names(data_scaled_t[i]))
+}
+
+## Return scatterplots
+
+  do.call(grid.arrange, lapply(1:15, scat_plot))
+  
+```
+
+Here, we still see similar correlations, but the data is now centered
+around (0,0), which allows us to better analyze our information.
+
+Above, we can see that **variable So is a categorical variable.** We
+will thus remove it from our PCA, as PCA should only be run with
+numerical variables. I will remove this and rescale the data:
+
+```{r}
+data_scaled <- as.data.frame(scale(crimedata[,-2]))
+```
+
+### Principal Component Analysis
+
+Above I explored the visualizations of scaled data to have an
+understanding of scaling. I will use the **prcomp()** to scale my data
+in this step. The information from data_scaled will come in use later.
+
+I will also only include the **predictor variables** in the PCA
+analysis, as the purpose is to reduce the amount and rank only the
+predictor variables
+
+```{r}
+## first, remove the categorical variable, as it should not be part of 
+## any PCA
+pca_crime <- prcomp(crimedata[, c(1, 3:15)], center = TRUE, scale = TRUE)
+summary(pca_crime)
+```
+
+Next, I will plot a few of the PC's of our transformed data to get an
+idea of what has happened here.
+
+```{r}
+PC1.2 <- ggplot(as.data.frame(pca_crime$x), aes(x = PC1, y = PC2)) + geom_point(weight = 1.5, color = randomColor())
+PC2.3 <- ggplot(as.data.frame(pca_crime$x), aes(x = PC2, y = PC3)) + geom_point(weight = 1.5, color = randomColor())
+PC3.4 <- ggplot(as.data.frame(pca_crime$x), aes(x = PC3, y = PC4)) + geom_point(weight = 1.5, color = randomColor())
+PC4.5 <- ggplot(as.data.frame(pca_crime$x), aes(x = PC4, y = PC5)) + geom_point(weight = 1.5, color = randomColor())
+
+grid.arrange(PC1.2, PC2.3, PC3.4, PC4.5)
+```
+
+These graphs show us that the Data has been transformed to run
+**parallel to the x-axis**, and they are each linear combinations of the
+different predictor variables.
+
+Now, let's look at the correlation between all our predictor variables.
+If we are correct, our correlations should be very close to 0.
+
+```{r}
+res2 <- cor(pca_crime$x, method="pearson")
+corrplot::corrplot(res2, method= "square", order = "AOE", tl.pos = 'n')
+
+```
+
+The matrix validates our model, that the correlations are all very close
+to 0 because our graph is entirely white!
+
+We next rotate our data based on the rotation values we extracted from
+our prcomp() model.
+
+```{r}
+pca_rotated <- as.data.frame(as.matrix(data_scaled[,1:14]) %*% pca_crime$rotation)
+
+PC1.2r <- ggplot(as.data.frame(pca_crime$x), aes(x = PC1, y = PC2)) + geom_point(weight = 1.5, color = randomColor())
+PC2.3r <- ggplot(as.data.frame(pca_crime$x), aes(x = PC2, y = PC3)) + geom_point(weight = 1.5, color = randomColor())
+PC3.4r <- ggplot(as.data.frame(pca_crime$x), aes(x = PC3, y = PC4)) + geom_point(weight = 1.5, color = randomColor())
+PC4.5r <- ggplot(as.data.frame(pca_crime$x), aes(x = PC4, y = PC5)) + geom_point(weight = 1.5, color = randomColor())
+
+grid.arrange(PC1.2r, PC2.3r, PC3.4r, PC4.5r)
+```
+
+#### Rotation Matrix
+
+The point of the doing the PCA analysis is to transform our Data. We do
+this by using the rotation matrix, when is a **matrix of eigenvectors**.
+We will return to this after we look at the variance and choose the
+number of principal components
+
+```{r}
+head(pca_crime$rotation)
+```
+
+#### Choosing the Number of Principal Components
+
+```{r}
+summary(pca_crime)
+```
+
+In the above summary, we can see the row **"proportion of variance,**"
+which shows what **percent of variance has been explained for each
+number of principal components**.
+
+We can see that PC1 shows the greatest proportion of variance at 38.65%,
+which each subsequent principal component adding more and more until the
+cumulative proportion of variance explains reaches 100% at PC15.
+
+The below plot looks at what percent variance has been explained for
+each number of principal components cumulatively.
+
+```{r}
+## chart showing the cumalitive proprition of variance
+## with each added PC
+plot(summary(pca_crime)$importance[3,], ylab = "Cumulative Proportion of Variance", pch = 16)
+```
+
+The above is similar to the **screeplot**, which helps us decide how
+many PC's we should use to transform our data.
+
+```{r}
+screeplot(pca_crime, type = "line", col = "darkblue")
+```
+
+Using both the screeplot and proportion of variance, **I chose to work
+with 6 Principal Components**. **After 6, the usefulness of each
+principal component does not seem significant**.
+
+### Linear Regression
+
+I now begin to build the **linear model.** From above, I have chosen to
+work with **6 principal components.** I then build a new data frame with
+these principal components and the response variable, crime.
+
+```{r}
+## Extract 6 principle components
+pc_crime <- pca_crime$x[,1:6]
+
+## build new data frame
+pc_crime_c <- cbind(pc_crime, Crime = crimedata[,16])
+
+##create linear model
+pc_lm <- lm(Crime~., data = as.data.frame(pc_crime_c))
+summary(pc_lm)
+```
+
+The output provides the **beta coefficients and significants of our
+principal components.** Based on our model, PC2 and PC6 are not
+statistically significant. We will move forward with all PC's, however.
+
+### Transforming the Data
+
+The next step is to get our **"alphas"** that are in terms of the
+original scaled variables. To do this, we do some matrix multiplication.
+First, I create a data matrix with just the coefficients for my own ease
+of use. I create a separate frame for the **intercept, beta_0**. Then,
+using our **rotation matrix from earlier (pca_crime\$rotation), we
+multiple this through our beta coefficients form our linear model**.
+With our coefficients, we have to be aware not to include the intercept,
+but we DO have to transform it separately.
+
+```{r}
+## Create a data frame with the coefficients
+## the first is for intercept, the second is for all other coefficients
+beta_0 <- pc_lm$coefficients[1]
+betas <- pc_lm$coefficients[-1]
+
+## compute alphas by applying the transformation left to right
+
+alphas <- pca_crime$rotation[,1:6] %*% betas
+alphas
+```
+
+Now we have our alpha values, but we cannot yet use them because they
+are scaled.
+
+```{r}
+## unscaled interept
+uns_beta0 <- beta_0 - sum(alphas * sapply(crimedata[,c(1, 3:15)],mean)/sapply(crimedata[,c(1, 3:15)],sd))
+
+## unscaled alphas, making sure to take into account exclusion of So
+unscaled_alphas <- alphas / sapply(crimedata[,c(1, 3:15)],sd)
+
+```
+
+### Prediction
+
+This table of **alpha values is the coefficients we will apply to our
+test poin**t. We do this through matrix multiplication. Value So will be
+removed from the test point, as it was removed for being a categorical
+variable. Because So is 0 in the test point, removing it from the set
+will not make a difference.
+
+```{r}
+## read in test point
+test_point <- data.frame(M = 14.0, Ed = 10.0, Po1 = 12.0, Po2 = 15.5, LF = 0.640, M.F = 94.0, Pop = 150, NW = 1.1, U1 = 0.120, U2 = 3.6, Wealth = 3200, Ineq = 20.1, Prob = 0.04, Time = 39.0)
+
+## our prediction is the matrix multiplaction of alphas and test points
+## plus the intercept
+prediction <- (as.matrix(test_point) %*% as.matrix(unscaled_alphas)) + uns_beta0
+
+prediction
+```
+
+**Our prediction is 1302.405**
+
+### Conclusion
+
+1.  This linear regression model after isolating the 6 **Principal
+    Components** with the highest variance predicts a crime rate of
+    approximately ***1302.405.*** This prediction seems to be in line
+    with other data points that contain similar predictors.
+
+2.  The categorical variable **So** was excluded before computing the
+    **PCA** and was never reintroduced. It wouldn't have made a
+    difference since its value is 0 in the new observation.
+
+3.  Here's a description of the approach I presented last week in
+    getting to ***Prediction = 892.545.***
+
+    > -   I created three linear models to test the crime data, one with
+    >     all of the data, one with a lower amount of data, and one with
+    >     the response variable transformed by the natural log. I then
+    >     looked at the \$R\^2\$ values and the p-values. A higher $R^2$
+    >     and lower p-value indicates better goodness of fit for our
+    >     model.
+    >
+    > -   I chose to disregard the first model with all variables
+    >     because there was collinearity among two sets of predictor
+    >     variables. While it had the highest $R^2$, I did not trust it.
+    >
+    >     The natural log transformed data set had a lower $R^2$ than
+    >     the othe two, so I also chose to disregard this model. The
+    >     model I chose, with the summary above, has $R^2 = 68%$. This
+    >     is the best fit withoutoverfitting.
+
+4.  My comparison of the **PCA** approach to **linear regression**
+    without it is as follows:
+
+    > -   The PCA approach results in $R^2 = 0.6448$, meaning the model
+    >     accounts for 65% of the variation within the model. The
+    >     p-value is 1.036e-07, which also suggests that this model is
+    >     statistically significant
+    >
+    > -   The $R^2$ in PCA analysis is less than the linear regression
+    >     model from last week, which could suggest that this model is
+    >     not as accurate as the linear regression model.
+
+
+```{r include=FALSE}
+### GOOD PRACTICES ###
+library(rsample)     # data splitting 
+library(dplyr)       # data wrangling
+library(rpart)       # performing regression trees
+library(rpart.plot)  # plotting regression trees
+library(randomForest)
+library(glm2)
+library(pscl)
+library(caret)
+library(plotROC)
+library(car)
+
+
+rm(list = ls())
+set.seed(42) # set a seed so it everything be reproducible  
+```
+
+## Question 10.1
+
+*Using the same crime data set uscrime.txt as in Questions 8.2 and 9.1,
+find the best model you can using (a) a regression tree model, and (b) a
+random forest model.\
+In R, you can use the tree package or the rpart package, and the
+randomForest package. For each model, describe one or two qualitative
+takeaways you get from analyzing the results (i.e., don't just stop when
+you have a good model, but interpret it too).*
+
+## Solution
+
+First, we read in the data.
+
+```{r}
+### Read in the data
+crimedata <- read.table("uscrime.txt", stringsAsFactors = FALSE, header = TRUE)
+```
+
+### a) Regression Tree Model
+
+#### Creating the Model
+
+To create the regression tree model, I will use rpart. I then plot a
+visualization of the tree to get a general idea of the model.
+
+```{r create rpart model}
+set.seed(42)
+## Use rpart to perform the regression model tree
+crimeR <- rpart(
+  formula = Crime ~ .,
+  data    = crimedata,
+  method  = "anova",
+  )
+
+## plot the tree
+rpart.plot(crimeR, main="Decision Tree Graph")
+#crimeR
+
+```
+
+This graph gives us 4 leaves and uses three variables: PO1, Pop, and NW.
+The interpretation of the leaves are:
+
+-   When **Po1 \< 7.7** and **Pop \< 23**: The mean crime rate is
+    **550**, and it covers **26%** of the data
+
+-   When **Po1 \< 7.7** and **Pop \> 23**: The mean crime rate is
+    **800**, and it covers **23%** of the data
+
+-   When **Po1 \> 7.7** and **NW \< 7.7**: The mean crime rate is
+    **887**, and it covers **21%** of the data
+
+-   When **Po1 \> 7.7** and **NW \> 7.7**: The mean crime rate is
+    **1305**, and it covers **30%%** of the data
+
+The table is a written summary of the decision tree graph.
+
+Next is the **pruning table**, which gives more information regarding
+the accuracy of the data
+
+```{r cp table}
+crimeR$cptable # output pruning table
+```
+
+The PruningTable depicts information about pruning from the rpart
+algorithm. There are two errors, **rel error** and **xerror**. rel error
+is the error for predictions within our model. **xerror is the
+cross-validation error** (rpart does cross validation for us). xerror is
+more useful in predicting the accuracy of this model.
+
+In selecting the the level of our tree, the rule of thumb is to select
+the lowest level where **rel_error + xstd \< xerror**. This would give
+us the 2nd level with an **xerror of 0.911.**
+
+Last, we look at the **cost complexity** graph, which tells us how much
+error is gained or lost for each level of complexity.
+
+```{r}
+plotcp(crimeR) # output cost complexity graph
+
+```
+
+This graph gives the same information of the pruning table: the model
+would be more **accurate with two levels instead of four**
+
+#### Fitting the Model
+
+The xerror is very high with this model, which means the accuracy is
+low. To attempt a more accurate model, the parameters in rpart allow for
+manipulation of the parameters.
+
+minsplit: the minimum number of data points required to attempt a split
+before it is forced to create a terminal node. The model has very few
+splits, and I wanted to force a few more, so I changed minsplit to 8.
+
+maxdepth: the maximum number of internal nodes between the root node and
+the terminal nodes. I set mine to 15.
+
+```{r crimeR try again}
+## Use rpart to perform the regression model tree with added parameters
+set.seed(13)
+crimeA <- rpart(
+  formula = Crime ~ .,
+  data    = crimedata,
+  method  = "anova",
+  control = list(minsplit = 8, maxdepth = 15)
+  )
+
+## plot the tree
+rpart.plot(crimeA, main="Decision Tree Graph")
+```
+
+The tree begins in the same way as our first tree. This one however,
+splits NW \> 7.7 into another branch, LV \<0.57. In this last leaf: when
+**LF \< .057**: The mean crime rate is **1115**, and it covers **15%%**
+of the data when **LF \> .057**: The mean crime rate is **1495**, and it
+covers **15%%** of the data
+
+Now we look at the **pruning table** to see if the accuracy has changed.
+
+```{r}
+crimeA$cptable
+```
+
+The xerror values decrease as we add nodes in this table. However, if we
+follow the **rule of thumb**, then we still choose the second node,
+where **xerror = 1.02.** And we check it against the **complexity
+graph**
+
+```{r}
+plotcp(crimeA)
+```
+
+Here, the data shows a better relative error as the the nodes increase.
+However, these models can fall into over fitting with too many nodes,
+which is what I think is happening here.
+
+**The best model is the default with two nodes**
+
+### b) Random Forest Model
+
+#### Creating the Model
+
+To fit the data to a random forest model, I will use the randomForest
+package. First, create the model and output the data.
+
+```{r randomforest model}
+CrimeF<- randomForest(Crime~., data = crimedata) #create model
+CrimeF
+```
+
+Important here is the **mean of square residuals: 88903.6** and **% Var
+explained : 39.27** Compared with our tree regression model, this is
+immediatley much better. Our regression model was best an error rate of
+about 98%, which means only 2% accuracy! The number of variables at each
+split tells us how many variables were used for each branch of the tree.
+The number of trees is the size of the forest, here it was 500
+
+This is further explained in the chart below
+
+```{r}
+plot(CrimeF)
+```
+
+We can see how the *error decreases as the number of trees increases*.
+Looking at the graph, however, I can see that the minimum error is
+actually at about 250 trees, as the graph error increases from there to
+500. With this information, I will run the model again.
+
+#### Fitting the Model
+
+As well as changing the number of trees from 500 to 250, I will change
+the split at each node from 5 to 4. I am doing this because the previous
+model suggested using a smaller amount of data
+
+```{r}
+CrimeFA<- randomForest(Crime~., data = crimedata, mtry = 4, ntree = 250)
+CrimeFA
+
+```
+
+With this new inormation, **mean of square residuals: 84706.16** and **%
+Var explained : 42.14**, which is better than the model using 500 trees.
+
+#### Conclusion
+
+**The Random Forest model** is the better fitting model when used with a
+**forest of 250 and 4 variables at each split.** This model explains for
+**41.57%** of variance. However, these are both worst than the **PCA
+model** from last week, The PCA approach resulted in\*\*
+$R^2 = 0.6448$\*\*, meaning the model accounts for 65% of the variation
+within the model. ThE PCA model is the most accurate model
+
+# Question 10.2
+
+*Describe a situation or problem from your job, everyday life, current
+events, etc., for which a logistic regression model would be
+appropriate. List some (up to 5) predictors that you might use.*
+
+## Solution
+
+In real estate, we want to know if a building will sell over \$1
+million. The neighborhoods are changing, types of buildings needed
+(offices vs apartments) create different demands, and the distance from
+the main metropolitan error all add to this. A logistic regression model
+would be appropriate, because we would chose building type, then
+neighborhood demographic, distance to metropolitan area, and if similar
+buildings have sold there in the past year. These would all lead us down
+the tree to if the building will fetch that asking price!
+
+
+## Question 11.1
+
+```{r include=FALSE}
+### GOOD PRACTICES ###
+library(tidyverse)
+library(caret)
+library(leaps)
+library(ggplot2)
+library(gridExtra)
+library(MLmetrics)
+library(glmnet)
+library(tidyverse)
+
+rm(list = ls())
+set.seed(42) # set a seed so it everything be reproducible  
+```
+
+
+*Using the same crime data set uscrime.txt as in Questions 8.2 and 9.1,
+and 10.1, build a regression model using:*
+
+*1. Stepwise Regression*
+
+*2. Lasso*
+
+*3. Electric Net*
+
+*For Parts 2 and 3, remember to scale the data first - otherwise, the
+regression coefficients will be on different scaled and the constraint
+won't have the desired effect.*
+
+*For Parts 2 and 3, use the glmnet function in R.*
+
+## Solution
+
+First, we read in and split the data.
+
+```{r}
+### Read in the data
+crimedata <- read.table("uscrime.txt", stringsAsFactors = FALSE, 
+                        header = TRUE)
+
+### Create training and testing sets for the data at 70% and 30%
+sample <- sample(c(TRUE, FALSE), nrow(crimedata), replace=TRUE, prob=c(0.8,0.2))
+ctrain <- crimedata[sample, ]
+ctest <- crimedata[!sample, ]
+```
+
+## Stepwise Regression
+
+### Build Step Regression on Trained Data
+
+To complete the stepwise regression, I chose to use the train() function
+from the caret package. This function uses cross-validation to select
+the best number of variables. The parameters I set in the fucntion are:
+method = "leapseq" -\> choses the stepwise regression function tuneGrid
+= data.frame(nvmax = 1:10) -\>returns models with number of predictors
+from 1 to 10 trControl = train.control -\> performs the cross validation
+based on the parameters set below
+
+```{r train for stepwise}
+
+## set up repeated k-fold cross-validation
+train.control <- trainControl(method = "cv", number = 7)
+
+## Train the model and perform step regression
+ctrain_steps <- train(Crime ~., data = ctrain, method = "leapSeq", 
+                      tuneGrid = data.frame(nvmax = 1:10), 
+                      trControl = train.control)
+ctrain_steps$results
+
+```
+
+The above output gives nvmax, the number of predictors used, RMSE and
+MAE. The lower these values the better the model. Rsquared is also
+defined in the model.
+
+### Visual Analysis
+
+To better visualize the data, I will make three plots, RMSE vs No of
+Predictors, Rsquared vs No of Predictors, and MAE vs No of predictors
+
+```{r}
+## extract the table of results
+res <- ctrain_steps$results
+
+a <- ggplot(res, aes(x = nvmax, y= Rsquared)) + geom_point(color = "blue") +
+  geom_line(color = "darkblue") + scale_x_continuous(name = "No of Variables",
+                                                     breaks = seq(0,10,1))
+b <- ggplot(res, aes(x = nvmax, y= RMSE)) + geom_point(color = "green") +
+  geom_line(color = "darkgreen") + scale_x_continuous(name = "No of Variables",
+                                                      breaks = seq(0,10,1))
+c <- ggplot(res, aes(x = nvmax, y= MAE)) + geom_point(color = "pink") + 
+  geom_line(color = "red") + scale_x_continuous(name = "No of Variables",
+                                                breaks = seq(0,10,1))
+
+grid.arrange(a,b,c, nrow = 2)
+
+```
+
+Visually, the highest R-squared and lowest RMSE and MAE values are at
+the same node, P = 1. I will now check the output data to see if the
+model agrees. The optimal number of variables is found with \$besttune
+
+### Extra Best Value
+
+```{r}
+ctrain_steps$bestTune
+
+```
+
+The model agrees with our visual inspection. One predictor seems very
+limited, however, so I will create a linear model only using the best
+coefficient and test it with our testing set.
+
+```{r}
+## Find the best coefficient
+coef(ctrain_steps$finalModel, 1)
+
+```
+
+### Build Linear Regression Model
+
+```{r}
+## create linear model with one predictor
+lm_1 <- lm(Crime ~ Po1, data = ctrain)
+summary(lm_1)
+```
+
+Next I test the data by first finding the predicted values from our test
+model and the actual values.
+
+### Test against Testing Set
+
+```{r}
+## calculate probability of default for each individual in test dataset
+predicted <- predict.lm(lm_1, ctest)
+
+## test against real responses
+lm_mape <- MAPE(predicted, ctest$Crime)
+
+paste0("Accuracy with 1 variable = ", round(lm_mape * 100, 2), "%")
+
+```
+
+This accuracy is VERY low. From the visual graphs before, the second
+best guess was with three variables. I will run this again using 3
+variables instead of 1.
+
+### Rerun experiment with 3 Variables
+
+```{r}
+## set up repeated k-fold cross-validation
+train.control <- trainControl(method = "cv", number = 7)
+
+## Train the model and perform step regression, set nvmax = 3
+ctrain_steps <- train(Crime ~., data = ctrain, method = "leapSeq", tuneGrid = data.frame(nvmax = 3), trControl = train.control)
+ctrain_steps$results
+
+## Find the best coefficients
+coef(ctrain_steps$finalModel, 3)
+```
+
+Now we have the variables to build the new regression model and test it
+agains the original data.
+
+```{r}
+
+## create linear model with three predictos
+lm_3 <- lm(Crime ~ Ed + Po1 + Ineq, data = ctrain)
+
+## calculate predicted values each individual in test dataset
+predicted <- predict.lm(lm_3, ctest)
+
+## test against real responses
+lm_mape_3 <- MAPE(predicted, ctest$Crime)
+
+paste0("Accuracy with 3 variables = ", round(lm_mape_3 * 100, 2), "%")
+
+```
+
+This accuracy is even lower, confirming using 1 variable provides the
+best model.
+
+### Conclusion
+
+Using Stepwise Regression, the best model comes from using one variable,
+Po1. It provies a model with R-squared = 0.6152050 and Accuracy =
+25.35%.
+
+## Lasso
+
+### Run data in glmnet
+
+Lasso is a Variable Selection technique that adds constraints to the
+regression equation. The sum of all coefficients cannot pass threshold
+T. In order to use glmet to perform this analysis, need to scale the
+predictors in the training data.
+
+```{r paged.print=FALSE}
+## glmet requires R matrices to perform. I will create two matrices, one for the prediction variables and one for the response variables
+## scale only the predictors
+pred <- as.matrix(scale(ctrain[,-16]))
+resp <- as.matrix(ctrain[,16])
+
+## run the glmnet with alpha = 1, which will nullify the quadratic expression
+lasso_c = glmnet(pred, resp, alpha = 1)
+plot(lasso_c)
+print(lasso_c)
+
+
+```
+
+The data shows the number of variables against the deviance explanined
+at the value of $\lambda$, the penalty term for Lasso. To sample what
+one of the outputs is, I will extract the coefficients for $\lambda$ =
+0.1
+
+```{r}
+coef(lasso_c, s = 0.1)
+```
+
+In this version, only 5 variables are being used.
+
+### Extract optimal penalty terms
+
+To chose the optimum $\lambda$, we can use the cross validation
+component in the glmnet pakcage.
+
+```{r}
+## use cv.glmnet to extract optimum lambda
+lasso_fit <- cv.glmnet(pred, resp)
+plot(lasso_fit)
+```
+
+This is the plot of the cross-validation curve along the lambda sequence
+(error bars). The two vertical lines are lambda.min, the value that
+gives minimum mean cross-validation error, and lambda.1se, which gives
+the most regularized model.
+
+I will extract the both lambda.min and lambda.lse and their
+coefficients.
+
+```{r}
+## coefficients for lambda.min
+c("<------lambda.min------>")
+coef(lasso_fit, s = "lambda.min")
+
+## coefficients for lambda.1se
+c("<------lambda.1se------>")
+coef(lasso_fit, s = 'lambda.1se')
+```
+
+The lowest cross validation (lambda.min), usses many more coefficients
+than the most regularized model, lambda.lse. Using the built in cross
+validation, I next test the data using predictions from the models. I do
+one for lambda.min and one for lambda.1se.
+
+### Test New Models
+
+```{r}
+## prediction for lambda.min
+predict_min <- predict(lasso_fit, newx = pred, s = "lambda.min")
+
+## test against real responses
+mape_min <- MAPE(predict_min, ctrain$Crime)
+
+paste0("Accuracy with lambda.min and 5 variables = ", round(mape_min * 100, 2), 
+       "%")
+
+## prediction for lambda.1se
+predict_1se <- predict(lasso_fit, newx = pred, s = "lambda.1se")
+
+## test against real responses
+mape_1se <- MAPE(predict_1se, ctrain$Crime)
+
+paste0("Accuracy with lambda.1se and 4 variables = ", round(mape_1se * 100, 2), 
+       "%")
+
+```
+
+The model using the "most regularized" lambda value has higher accuracy,
+and is perhaps the more reliable model.
+
+```{r}
+## extract coefficients
+coef(lasso_fit, s = "lambda.1se")
+
+```
+
+### Build Regression Model
+
+The coefficients used in this model are So, Po1, LF, and M.F. I build a
+regression model on the training data with these predictors.
+
+```{r}
+lasso_lm <- lm(Crime ~ So + Po1 + LF + M.F, data = ctrain)
+summary(lasso_lm)
+```
+
+### Test against testing set
+
+Next I test this data against the training testing set
+
+```{r}
+
+## prediction using the new model.
+predict_lasso <- predict(lasso_lm, ctest)
+
+## test against real responses
+mape_lasso <- MAPE(predict_lasso, ctest$Crime)
+
+paste0("Accuracy of lasso model to testing set = ", round(mape_lasso * 100, 2), 
+       "%")
+
+```
+
+### Conclusion
+
+This accuracy is better than used for the stepwise Regression, and it
+keeps So, Po1, LF, and M.F. as the variables.
+
+## Elastic Net
+
+Elastic is a Variable Selection technique that adds constraints to the
+regression equation: the absolute values of the sums of all coefficients
+and their squares. I use glmnet to perform this analysis, beginning
+midway through the analysis for Lasso.
+
+### Build Models with Different $\alpha$ 's
+
+To perform Elastic Net regression, we will use the same beginning as
+used in the Lasso steps. We will deviate at the start of the cross
+validation, where I will test different levels of alpha.
+
+```{r}
+
+## the foldid parameter to test for different alpha's
+foldid <- sample(1:7, size = length(resp), replace = TRUE)
+
+## create 5 models with different alpha's
+cv_1 <- cv.glmnet(pred, resp, foldid = foldid, alpha = .1)
+cv_3 <- cv.glmnet(pred, resp, foldid = foldid, alpha = .3)
+cv_5 <- cv.glmnet(pred, resp, foldid = foldid, alpha = .5)
+cv_7 <- cv.glmnet(pred, resp, foldid = foldid, alpha = .7)
+cv_9 <- cv.glmnet(pred, resp, foldid = foldid, alpha = .9)
+
+plot(cv_1, sub = "Alpha = 0.1")
+plot(cv_3, sub = "Alpha = 0.3")
+plot(cv_5, sub = "Alpha = 0.5")
+plot(cv_7, sub = "Alpha = 0.7")
+plot(cv_9, sub = "Alpha = 0.9")
+
+
+```
+
+### Test for Accuracy
+
+I created a function to extract the accuracy for the models.
+
+```{r}
+
+accuracy <- function(cv_model){
+  predict_min <- predict(cv_model, newx = pred, s = "lambda.min")
+  mape_min <- MAPE(predict_min, ctrain$Crime)
+  paste0("Accuracy with lambda.min for ",deparse(substitute(cv_model)), " is ", round(mape_min * 100, 2), "%")
+  ## prediction for lambda.1se
+  predict_1se <- predict(cv_model, newx = pred, s = "lambda.1se")
+  ## test against real responses
+  mape_1se <- MAPE(predict_1se, ctrain$Crime)
+  cat("Accuracy with lambda.1se for " , deparse(substitute(cv_model)), " is ", round(mape_1se * 100, 2), "%\n",
+         "Accuracy with lambda.min for ",deparse(substitute(cv_model)), " is ", round(mape_min * 100, 2), "%\n")
+}
+
+accuracy(cv_1)
+accuracy(cv_3)
+accuracy(cv_5)
+accuracy(cv_7)
+accuracy(cv_9)
+
+```
+
+Above we have the accuracies for the moels at different alpha values. Th
+largest accuracy is when alpha = 90%.
+
+I will use this value and corresponding $\lambda$ to create the linear
+model against which I test the original data.
+
+```{r}
+## define best model
+lasso_fit_e <- cv.glmnet(pred, resp, alpha = .9)
+## extract coefficients
+coef(lasso_fit_e, s = "lambda.1se")
+
+
+```
+
+### Build Regression Model
+
+This model only uses the Po1 coefficient, so I build a regression model
+on the training data with these predictors.
+
+```{r}
+lasso_lm_e <- lm(Crime ~ Po1, data = ctrain)
+summary(lasso_lm_e)
+```
+
+### Test against testing set
+
+Next I test this data against the training testing set
+
+```{r}
+
+## prediction using the new model.
+predict_lasso_e <- predict(lasso_lm_e, ctest)
+
+## test against real responses
+mape_lasso_e <- MAPE(predict_lasso_e, ctest$Crime)
+
+paste0("Accuracy of lasso model to testing set = ", 
+       round(mape_lasso_e * 100, 2), "%")
+
+```
+
+### Conclusion
+
+The Elastic Net model has a lower accuracy than the Lasso Method. This
+makes sense, as the accuracy of the model as the $\alpha$ value was
+increasing, slowly getting closer to $\alpha$ = 1, the Lasso model.
+
+## Conclusion
+
+The three models gave two different conclusions. The Stepwise Regression
+and Elastic Net method both kept only one variable, Po1, while the Lasso
+Method retained variables So Po1, LF, and M.F.
+
+My testing showed that the Lasso Method had a slightly more accuracte
+model than the other two. Having more variables, while it does introduce
+more bias, counteracts the underfitting that can happen when there is
+only one variable. Intuition says that only one variable is enough to
+build a new regression model. I would suggest using the Lasso Model and
+variables So, Po1, LF, and M.F.

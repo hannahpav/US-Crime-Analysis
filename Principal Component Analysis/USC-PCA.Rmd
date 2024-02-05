@@ -9,26 +9,15 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-## Question 5.1
 
 *Using crime data from the file uscrime.txt
 (<http://www.statsci.org/data/general/uscrime.txt,> description at
 [http://www.statsci.org/data/general/uscrime.html),](http://www.statsci.org/data/general/uscrime.html),)
 
+The purpose of this portion is to apply Principal Component Analysis and then create a regression model using
+the first few principal components.
+Compare the model to the model created under the best Linear Regression Model
 
-## Question 9.1
-
-*Using the same crime data set uscrime.txt as in Question 8.2, apply
-Principal Component Analysis and then create a regression model using
-the first few principal components. Specify your new model in terms of
-the original variables (not the principal components), and compare its
-quality to that of your solution to Question 8.2. You can use the R
-function prcomp for PCA. (Note that to first scale the     data, you can
-include scale. = TRUE to scale as part of the PCA function. Don't forget
-that, to make a prediction for the new city, you'll need to unscale the
-coefficients (i.e., do the scaling calculation in reverse)!)*
-
-## Solution
 
 ```{r include=FALSE}
 ### GOOD PRACTICES ###
@@ -50,52 +39,15 @@ rm(list = ls())
 set.seed(42) # set a seed so it everything be reproducible  
 ```
 
-### Exploratory Data Analysis
-
-First, let's do some Exploratory Data Analysis and get a good look at
-the data we are dealing with.
-
-```{r}
-### Read in the data
-crimedata <- read.table("uscrime.txt", stringsAsFactors = FALSE, header = TRUE)
-```
-
-I also make a scatterplot of ALL variables against Crime to see where
-there is linearity.
-
-```{r}
-## Function to create scatter plots
-scat_plot <- function(i){
-  ggplot(crimedata, aes(x = crimedata[,i], y = Crime)) + 
-    geom_point(weight = 1.5, color = randomColor()) +  xlab(names(crimedata[i]))
-}
-
-## Return scatterplots
-
-  do.call(grid.arrange, lapply(1:15, scat_plot))
-```
-
-Let's visualize the data, specifically the **correlation of the data.**
-
-```{r}
-res <- cor(crimedata[,1:15], method="pearson")
-corrplot::corrplot(res, method= "square", order = "AOE", tl.pos = 'n')
-```
-
-From the above, we have a better understanding of how the predictor
-variables are correlated. Some of them have very strong correlations
-while many of them are near-zero.
-
-Our goal in using PCA-analysis is to reduce the correlation between
-these predictor variables to reduce overfitting.
-
 ### Scaling the Data
 
-Next I scale the data, to center the data around 0-0 and get a more
+First, scale the data, to center the data around 0-0 and get a more
 sensible scale of the data. I replot the correlation matrix and
 exploratory models.
 
 ```{r}
+### Read in the data
+crimedata <- read.table("data/uscrime.txt", stringsAsFactors = FALSE, header = TRUE)
 ### Scale the data
 data_scaled_t <- as.data.frame(scale(crimedata))
 ```
@@ -318,7 +270,7 @@ prediction
     difference since its value is 0 in the new observation.
 
 3.  Here's a description of the approach I presented last week in
-    getting to ***Prediction = 892.545.***
+    getting to ***Prediction = 957.369. ***
 
     > -   I created three linear models to test the crime data, one with
     >     all of the data, one with a lower amount of data, and one with
