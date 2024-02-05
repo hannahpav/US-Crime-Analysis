@@ -1,5 +1,5 @@
 # US-Crime-Analysis
-This project was done in conjunction with class ISYE 6501 at the University of Georgia.
+This project was done in conjunction with class ISYE 6501 at the University of Georgia. It was written exclusively in R.
 ### Project Objective
 Using the data set file uscrime.txt (http://www.statsci.org/data/general/uscrime.txt, http://www.statsci.org/data/general/uscrime.html), I tested various methods of model building and variable selection to find the model with the lowest MSE.
 The method used are:
